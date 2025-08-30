@@ -1,25 +1,30 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Create an Amazon Bedrock Guardrail, attach it to a new Agent, prepare the
-Agent, and invoke it – all with plain boto3 calls.
 
-© 2025 Amazon.com, Inc. or its affiliates. SPDX-License-Identifier: Apache-2.0
-"""
+import json
+import time
+import uuid
+import boto3
+import textwrap
+from dotenv import load_dotenv
+import sys
+import config as cfg
+import os 
 
-def create_role(guardrail_id):
+load_dotenv()
 
-    # ─── edit these ────────────────────────────────────────────────────────────────
-    ROLE_NAME      = "BedrockAgentExecutionRole"
-    GUARDRAIL_ID   = guardrail_id        # or "*" to trust all guardrails
-    # ──────────────────────────────────────────────────────────────────────────────
+# Configuration
+FOUNDATION_MODEL  = cfg.FOUNDATION_MODEL
+ACCOUNT_ID   = os.getenv("ACCOUNT_ID")
+REGION = cfg.REGION
 
-    guardrail_arn  = f"arn:aws:bedrock:{REGION}:{ACCOUNT_ID}:guardrail/{GUARDRAIL_ID}"
+
+def create_role(guardrail_id, role_name="BedrockAgentExecutionRole"):
+
+    guardrail_arn  = f"arn:aws:bedrock:{REGION}:{ACCOUNT_ID}:guardrail/{guardrail_id}"
     model_arn = f"arn:aws:bedrock:{REGION}::foundation-model/{FOUNDATION_MODEL}"
 
     iam = boto3.client("iam")
 
-    # 1 ─── service-trust policy (Bedrock must be able to assume the role) ─────────
+    # Service-trust policy (Bedrock must be able to assume the role) 
     trust_policy = {
         "Version": "2012-10-17",
         "Statement": [{
@@ -33,7 +38,7 @@ def create_role(guardrail_id):
         }]
     }
 
-    # 2 ─── permissions Bedrock needs during inference + guardrails ────────────────
+    # Permissions Bedrock needs during inference + guardrails 
     perm_policy = {
         "Version": "2012-10-17",
         "Statement": [
@@ -55,51 +60,24 @@ def create_role(guardrail_id):
         ]
     }
 
-    # 3 ─── create the role & attach the inline policy ─────────────────────────────
+    # Create the role & attach the inline policy 
     role = iam.create_role(
-        RoleName               = ROLE_NAME,
+        RoleName               = role_name,
         AssumeRolePolicyDocument= json.dumps(trust_policy),
         Description            = "Executes Amazon Bedrock agents with guardrails applied",
         Tags=[{"Key": "CreatedBy", "Value": "script"}]
     )
 
     iam.put_role_policy(
-        RoleName      = ROLE_NAME,
+        RoleName      = role_name,
         PolicyName    = "BedrockAgentPermissions",
         PolicyDocument= json.dumps(perm_policy)
     )
 
-    # 4 ─── wait a few seconds for IAM to propagate, then print the ARN ────────────
-    time.sleep(10)           # <-- simpler than building a waiter for this demo
+    # Wit a few seconds for IAM to propagate, then print the ARN 
+    time.sleep(10) 
     print("✅ Role ready →", role["Role"]["Arn"])
-
-
-
-import json
-import time
-import uuid
-import boto3
-import textwrap
-from botocore.exceptions import ClientError, WaiterError
-from dotenv import load_dotenv
-import sys
-
-load_dotenv()
-
-# ---------------------------------------------------------------------------
-# 0.  Configuration – edit these!
-# ---------------------------------------------------------------------------
-
-REGION            = "us-east-1"   # e.g. "us-east-1"
-FOUNDATION_MODEL  = "anthropic.claude-3-haiku-20240307-v1:0"   # e.g. "meta.llama3-8b-instruct-v1:0"
-#AGENT_ROLE_ARN    = "arn:aws:iam::637423356581:role/service-role/AmazonBedrockExecutionRoleForAgents_T1BZO63F7ZS"   # IAM role the Agent will assume
-ACCOUNT_ID        = "637423356581"   # just for naming hygiene
-AGENT_ROLE_ARN = "arn:aws:iam::637423356581:role/BedrockAgentExecutionRole"
-
-# ---------------------------------------------------------------------------
-# 1.  Create a guardrail (status = DRAFT)
-#     See Bedrock.create_guardrail docs :contentReference[oaicite:0]{index=0}
-# ---------------------------------------------------------------------------
+    return role["Role"]["Arn"]  
 
 def create_guardrail():
     """
@@ -138,15 +116,15 @@ def create_guardrail():
                     'outputModalities': [
                         'TEXT','IMAGE',
                     ],
-                    'inputAction': 'BLOCK', # ? if none we can see the This allows you to preview the guardrail evaluation and see that VIOLENCE was detected (true), but no action was taken because you configured that to NONE.
+                    'inputAction': 'BLOCK', 
                     'outputAction': 'BLOCK',
-                    'inputEnabled': True, # YOU ARE CHARGE FOR EVALUATION BUT SEE WHAT THE GUARDRAIL OUTPUTS
+                    'inputEnabled': True, 
                     'outputEnabled': True
                 },
                 {
                     'type': 'PROMPT_ATTACK',
                     'inputStrength': 'HIGH',
-                    'outputStrength': 'NONE', # FOR PROMPT ATTACKS WE CAN ONLY BLOCK INPUTS
+                    'outputStrength': 'NONE', 
                     'inputModalities': [
                         'TEXT','IMAGE'
                     ],
@@ -163,14 +141,14 @@ def create_guardrail():
         wordPolicyConfig={
             'wordsConfig': [
                 {
-                    'text': 'metal',   #HERE WE CAN ONLY 
+                    'text': 'metal',  
                     'inputAction': 'BLOCK',
                     'outputAction': 'BLOCK',
                     'inputEnabled': True,
                     'outputEnabled': True
                 },
                 {
-                    'text': 'rock music',   #HERE WE CAN ONLY 
+                    'text': 'rock music',  
                     'inputAction': 'BLOCK',
                     'outputAction': 'BLOCK',
                     'inputEnabled': True,
@@ -179,7 +157,7 @@ def create_guardrail():
             ],
             'managedWordListsConfig': [
                 {
-                    'type': 'PROFANITY',# BLOCK PROFANITE WORDS
+                    'type': 'PROFANITY',
                     'inputAction': 'BLOCK',
                     'outputAction': 'BLOCK',
                     'inputEnabled': True,
@@ -210,7 +188,7 @@ def create_guardrail():
                 {
                     'name': 'BITCOIN_WALLET',
                     'description': 'Bitcoin address (Base58 or Bech32)',
-                    'pattern': r"\b(?:[13][a-km-zA-HJ-NP-Z1-9]{25,34}|bc1[0-9a-z]{6,87})\b", # 1BoatSLRHtKNngkdXEeobR76b53LETtpyT
+                    'pattern': r"\b(?:[13][a-km-zA-HJ-NP-Z1-9]{25,34}|bc1[0-9a-z]{6,87})\b", 
                     'action': 'ANONYMIZE',
                     'inputAction': 'ANONYMIZE', 
                     'outputAction': 'ANONYMIZE',
@@ -244,117 +222,65 @@ def create_guardrail():
     
     return guardrail_id, guardrail_version
 
-"""
+def create_agent(guardrail_id, agent_role_arn, guardrail_version = "DRAFT" ):
 
-################################################
-#   1.5 call create_guardrail with the guardrail id which returns an agent role arn
-#  #create_role(guardrail_id="k6582ey6du0o")
-######################################
+    agent_name = f"demo-agent-guardrails-{uuid.uuid4().hex[:6]}" # demo-guarded-agent-162c24
+    ag = boto3.client("bedrock-agent")
 
-# OPTIONAL: snapshot the guardrail so you have an immutable version = "1"
-# br.create_guardrail_version(guardrailIdentifier=guardrail_id,
-#                             description="Initial production snapshot")
+    print(f"Creating Agent: {agent_name}")
+    agent_resp = ag.create_agent(
+        agentName            = agent_name,
+        foundationModel      = FOUNDATION_MODEL,
+        instruction          = "You are a friendly music bot.  Obey the guardrail.",
+        agentResourceRoleArn = agent_role_arn,
+        guardrailConfiguration = {
+            "guardrailIdentifier": guardrail_id,
+            "guardrailVersion"   : guardrail_version        # "DRAFT" or "1" if you snapshotted
+        },
+        idleSessionTTLInSeconds = 300                       # keep chat context for 5 minutes
+    )
+    agent_id = agent_resp["agent"]["agentId"]
+    print(f"Agent ID: {agent_id}")
+    return agent_id
 
-# ---------------------------------------------------------------------------
-# 2.  Create an Agent and attach the guardrail
-#     GuardrailConfiguration documented in CreateAgent :contentReference[oaicite:1]{index=1}
-# ---------------------------------------------------------------------------
+def prepare_agent(agent_id):
+    ag = boto3.client("bedrock-agent")
+    ag.prepare_agent(agentId=agent_id)
 
-"""
-guardrail_id      = "k6582ey6du0o"  # replace with your guardrail ID
-guardrail_version = "DRAFT"          # or "1" if you snapshot the guardrail
+    # Poll until the Agent shows status PREPARED (no waiter yet in boto3)
+    while True:
+        status = ag.get_agent(agentId=agent_id)["agent"]["agentStatus"]
+        print("   status =", status)
+        if status == "PREPARED":
+            break
+        if status == "FAILED":
+            raise RuntimeError("Agent failed to prepare; check failureReasons.")
+        time.sleep(15)
 
-agent_name = f"demo-agent-guardrails-{uuid.uuid4().hex[:6]}" # demo-guarded-agent-162c24
-ag = boto3.client("bedrock-agent")
+    print("Agent is ready!")
 
-print(f"Creating Agent: {agent_name}")
-agent_resp = ag.create_agent(
-    agentName            = agent_name,
-    foundationModel      = FOUNDATION_MODEL,
-    instruction          = "You are a friendly music bot.  Obey the guardrail.",
-    agentResourceRoleArn = AGENT_ROLE_ARN,
-    guardrailConfiguration = {
-        "guardrailIdentifier": guardrail_id,
-        "guardrailVersion"   : guardrail_version        # "DRAFT" or "1" if you snapshotted
-    },
-    idleSessionTTLInSeconds = 300                       # keep chat context for 5 minutes
-)
-agent_id = agent_resp["agent"]["agentId"]
-print(f"Agent ID: {agent_id}") # Agent ID: 5NCM7AF2D1
-
-"""
-
-# ---------------------------------------------------------------------------
-# 3.  Prepare the Agent so it can serve traffic  :contentReference[oaicite:2]{index=2}
-# ---------------------------------------------------------------------------
+def agent_alias(agent_id,alias_name="demo"):
+    ag = boto3.client("bedrock-agent")
 
 
-"""
+    alias_resp     = ag.create_agent_alias(         
+        agentId=agent_id,
+        agentAliasName=alias_name
+    )
+    agent_alias_id = alias_resp["agentAlias"]["agentAliasId"]
 
-print("Preparing Agent (this creates a DRAFT version and loads the model) …")
-agent_id = "XPPGNLJAJV" 
-ag = boto3.client("bedrock-agent")
-ag.prepare_agent(agentId=agent_id)
+    # Check agent status
+    while ag.get_agent_alias(agentId=agent_id,
+                            agentAliasId=agent_alias_id)["agentAlias"]["agentAliasStatus"] != "PREPARED":
+        time.sleep(5)
 
-# Poll until the Agent shows status PREPARED (no waiter yet in boto3)
-while True:
-    status = ag.get_agent(agentId=agent_id)["agent"]["agentStatus"]
-    print("   status =", status)
-    if status == "PREPARED":
-        break
-    if status == "FAILED":
-        raise RuntimeError("Agent failed to prepare; check failureReasons.")
-    time.sleep(15)
+    agent_response = ag.get_agent_alias(agentId=agent_id,
+                            agentAliasId=agent_alias_id)
 
-print("Agent is ready!")
+    print(f"Agent alias with id {agent_alias_id} is ready pointing to version {agent_response['agentAlias']['routingConfiguration'][0]["agentVersion"]}")
+    return agent_alias_id, agent_response['agentAlias']['routingConfiguration'][0]["agentVersion"]
 
-"""
-
-# ---------------------------------------------------------------------------
-# 3.5.  Create an Agent Version or Alias
-#     
-# ---------------------------------------------------------------------------
-
-# --- Freeze the draft into version 1 -------------------------------
-
-"""
-agent_id = "XPPGNLJAJV" 
-ag = boto3.client("bedrock-agent")
-
-    # e.g. "1"
-
-# --- Create an alias that sends 100 % traffic to v1 ----------------
-
-alias_resp     = ag.create_agent_alias(            # :contentReference[oaicite:2]{index=2}
-    agentId=agent_id,
-    agentAliasName="demo"
-)
-agent_alias_id = alias_resp["agentAlias"]["agentAliasId"]
-
-
-
-
-
-
-# (optional) wait until aliasStatus == "PREPARED"
-while ag.get_agent_alias(agentId=agent_id,
-                         agentAliasId=agent_alias_id)["agentAlias"]["agentAliasStatus"] != "PREPARED":
-    time.sleep(5)
-
-agent_response = ag.get_agent_alias(agentId=agent_id,
-                         agentAliasId=agent_alias_id)
-
-print(f"Agent alias with id {agent_alias_id} is ready pointing to version {agent_response['agentAlias']['routingConfiguration'][0]["agentVersion"]}")
-
-
-"""
-
-# ---------------------------------------------------------------------------
-# 4.  Invoke the Agent at runtime
-#     Agents for Bedrock Runtime → invoke_agent :contentReference[oaicite:3]{index=3}
-# ---------------------------------------------------------------------------
 def check_grounding_and_relevance(guardrail_id,guardrail_version):
-
     runtime = boto3.client("bedrock-runtime", region_name=REGION)
 
     SOURCE = """
@@ -383,7 +309,7 @@ def check_grounding_and_relevance(guardrail_id,guardrail_version):
         )
 
         cg = resp["assessments"][0]["contextualGroundingPolicy"]["filters"]
-        print(cg)
+
         g_score = cg[0]["score"]
         r_score = cg[1]["score"]
         action  = resp["action"]
@@ -397,127 +323,57 @@ def check_grounding_and_relevance(guardrail_id,guardrail_version):
     for label, ans in ANSWERS.items():
         check(ans)
 
-
 def show_guardrail_trace(trace_part: dict):
-    
     g = trace_part["trace"]["guardrailTrace"]       # ← object of interest
-    print(g)
-    print("\n── GuardrailTrace ──")
+
+    print("GuardrailTrace")
     print("overall action:", g["action"])           # NONE | GUARDRAIL_INTERVENED
 
     for side, assessments in (("INPUT",  g.get("inputAssessments",  [])),
                               ("OUTPUT", g.get("outputAssessments", []))):
         for a in assessments:
             print(f"{side}: policy={a}")
-            # the assessment object contains sub-sections for every policy type:
-            #   topicPolicy, contentPolicy, wordPolicy, sensitiveInformationPolicy …
-            # each sub-section lists matches + the action Bedrock took.
-            #print(json.dumps(a, indent=2)[:500], "…")   # trim for brevity
+
+def invoke_agent(agent_id, agent_alias_id, user_prompt = "what type of music do you like?"):
+    runtime = boto3.client("bedrock-agent-runtime")
+    session_id = str(uuid.uuid4())
+
+        
+    response  = runtime.invoke_agent(
+        agentId   = agent_id,
+        agentAliasId = agent_alias_id,
+        sessionId = session_id,
+        inputText = user_prompt,
+        enableTrace     = True,    
+        streamingConfigurations = {
+            "applyGuardrailInterval": 20,               # re-check every 20 chars (default 50)
+            "streamFinalResponse":   False,
+
+        }
+    )
 
 
-# here we invoke th e agennttt
-runtime = boto3.client("bedrock-agent-runtime")
-agent_id = "XPPGNLJAJV" 
-agent_alias_id = "H4O0JQYLDK"  # replace with your agent alias ID
+    for event in response["completion"]:
+        if "chunk" in event:                              # response text
+            sys.stdout.write(event["chunk"]["bytes"].decode())
+            sys.stdout.flush()
 
-session_id = str(uuid.uuid4())
-user_prompt = "what type of music do you like?"
-      
-
-
-response  = runtime.invoke_agent(
-    agentId   = agent_id,
-    agentAliasId = agent_alias_id,
-    sessionId = session_id,
-    inputText = user_prompt,
-    enableTrace     = True,    
-    streamingConfigurations = {
-        "applyGuardrailInterval": 20,               # re-check every 20 chars (default 50)
-        "streamFinalResponse":   False,
-
-    }
-)
-
-completion_text = ""
-
-for event in response["completion"]:
-    if "chunk" in event:                              # response text
-        sys.stdout.write(event["chunk"]["bytes"].decode())
-        sys.stdout.flush()
-
-    if "trace" in event:                              # a TracePart object
-        trace_part = event["trace"]                   # contains .trace sub-object
-        if "guardrailTrace" in trace_part.get("trace", {}):
-            show_guardrail_trace(trace_part)
+        if "trace" in event:                              # a TracePart object
+            trace_part = event["trace"]                   # contains .trace sub-object
+            if "guardrailTrace" in trace_part.get("trace", {}):
+                show_guardrail_trace(trace_part)
      
 
-
-
-
-"""
-runtime = boto3.client("bedrock-agent-runtime")
-agent_id = "XPPGNLJAJV" 
-agent_alias_id = "H4O0JQYLDK"  # replace with your agent alias ID
-
-session_id = str(uuid.uuid4())
-user_prompt = "I hate ugly people"
-
-response  = runtime.invoke_agent(
-    agentId   = agent_id,
-    agentAliasId = agent_alias_id,
-    sessionId = session_id,
-    inputText = user_prompt
-)
-traces = []
-completion = ""
-#print(response)
-pretty_trace(response)  # print the guardrail action and assessments
-
-for event in response.get("completion"):
-    print(event)
-    try:
-        trace = event["trace"]
-        traces.append(trace['trace'])
-    except KeyError:
-        chunk = event["chunk"]
-        completion = completion + chunk["bytes"].decode()
-    except Exception as e:
-        print(e)
+def main():
+    guardrail_id, guardrail_version = create_guardrail()
+    role_arn = create_role(guardrail_id=guardrail_id)
+    agent_id = create_agent(guardrail_id = guardrail_id, agent_role_arn = role_arn)
+    prepare_agent(agent_id = agent_id)
+    alias_id, alias_name = agent_alias(agent_id)
+    invoke_agent(agent_id = agent_id, agent_alias_id = alias_id, user_prompt = "what type of music do you like?")
     
-    print(traces)
-    print(completion)
-   #json.dumps(completion)
-
-"""
+if __name__ == "__main__":
+    main()
 
 
-
-""" 
-
-for event in resp_stream["completion"]:
-    if "chunk" in event:                         # plain response tokens
-        sys.stdout.write(event["chunk"]["bytes"].decode("utf-8"))
-        sys.stdout.flush()
-    elif "trace" in event:                       # a reasoning step
-        print("\n\n--- TRACE ----------------------------------")
-        print(event["trace"]["trace"])
-        print("--------------------------------------------\n")
-
-
-
-
-payload = invoke_resp["bytes"].decode("utf-8")
-answer  = json.loads(payload)
-
-print("\n--- Agent Response -------------------------------------------")
-print(json.dumps(answer, indent=2))
-
-if answer.get("stopReason") == "guardrail_intervened":
-    print("\nGuardrail blocked the request exactly as intended ✔️")
-"""
-# ---------------------------------------------------------------------------
-# 5.  Clean-up helpers (uncomment if you want to delete resources)
-# ---------------------------------------------------------------------------
-# ag.delete_agent(agentId=agent_id)
-# br.delete_guardrail(guardrailIdentifier=guardrail_id)
 
